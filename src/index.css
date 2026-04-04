@@ -1,0 +1,31 @@
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700;900&family=Raleway:ital,wght@0,300;0,400;1,300&display=swap');
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  --bg: #050a14;
+  --text-primary: #ffffff;
+  --text-secondary: #889aaa;
+  --text-muted: #445566;
+  --accent: #4488ff;
+  --font-display: 'Cinzel', serif;
+  --font-body: 'Raleway', sans-serif;
+}
+
+html {
+  overflow-x: hidden;
+}
+
+body {
+  background: #050a14;
+  font-family: var(--font-body);
+  overflow-x: hidden;
+}
+
+canvas {
+  display: block;
+}
