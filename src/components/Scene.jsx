@@ -21,101 +21,97 @@ function easeInOut(t) {
 }
 
 // ─── Camera Rig ───────────────────────────────────────────────────────────────
-// Phases per sword (localT 0→1 over 30 Z-units):
+// Per sword — 4 strict phases, camera X always returns to 0 before pass:
 //
-//  APPROACH  0.00 → 0.45  Straight forward on X=0 toward sword sweet spot
-//  ORBIT     0.45 → 0.70  Pivot right around sword
-//  PASS      0.70 → 1.00  Camera snaps back to X=0 and blasts straight through
+//  APPROACH  0.00 → 0.40  Straight forward on Z=0 axis toward sword
+//  ORBIT     0.40 → 0.65  Pivot right around sword, camera X goes positive
+//  REALIGN   0.65 → 0.80  Camera X returns to 0, still looking at sword
+//  PASS      0.80 → 1.00  Straight forward on Z=0 axis through sword, close
 //
-// CRITICAL: No React setState inside here. Only writes to scrollState plain obj.
-// Sword visibility is handled purely by fog — swords outside fog range are
-// invisible naturally. No mount/unmount tricks.
+// Next sword only becomes visible after PASS phase starts (localT > 0.80)
 
-function CameraRig({ onIndexChange }) {
+function CameraRig({ onSwordChange, onPhaseChange }) {
   const smoothPos = useRef(new THREE.Vector3(0, 0, 5));
-  const smoothLook = useRef(new THREE.Vector3(0, 0, -5));
+  const smoothLook = useRef(new THREE.Vector3(0, 0, -8));
   const lastIndex = useRef(-1);
-  // Store raw target each frame — lerp smoothly toward it
-  const rawPos = useRef(new THREE.Vector3(0, 0, 5));
-  const rawLook = useRef(new THREE.Vector3(0, 0, -5));
 
   useFrame(({ camera }) => {
-    const progress = scrollState.scrollProgress || 0;
-    const totalZ = progress * CAMERA_PATH_LENGTH;
+    const raw = scrollState.scrollProgress || 0;
+    const totalZ = raw * CAMERA_PATH_LENGTH;
 
-    // Which sword are we in, and how far through it (0→1)
-    const si = Math.min(Math.floor(totalZ / 30), SWORDS.length - 1);
-    const localT = Math.min((totalZ - si * 30) / 30, 1);
+    const swordIndex = Math.min(Math.floor(totalZ / 30), SWORDS.length - 1);
+    const localZ = totalZ - swordIndex * 30;
+    const localT = Math.min(localZ / 30, 1);
 
-    // Update index — but only write to plain scrollState, never setState here
-    if (si !== lastIndex.current) {
-      lastIndex.current = si;
-      scrollState.currentSwordIndex = si;
-      scrollState.elementColorHex = ELEMENT_COLORS[SWORDS[si].element];
-      // This is the ONLY setState call — once per sword switch, not per frame
-      onIndexChange(si);
+    if (swordIndex !== lastIndex.current) {
+      lastIndex.current = swordIndex;
+      scrollState.currentSwordIndex = swordIndex;
+      scrollState.elementColorHex = ELEMENT_COLORS[SWORDS[swordIndex].element];
+      onSwordChange(swordIndex, localT);
     }
 
-    const swordZ = SWORD_POSITIONS[si].z;
-    const sweetSpot = swordZ + 5; // 5 units in front of sword
-    const prevZ = si === 0 ? 5 : SWORD_POSITIONS[si - 1].z - 5;
-    const orbitR = 5;
+    // Also fire phase updates every frame so visibility updates correctly
+    onPhaseChange(swordIndex, localT);
 
-    if (localT < 0.45) {
-      // ── APPROACH ────────────────────────────────────────────────────────────
-      const t = easeInOut(localT / 0.45);
-      rawPos.current.set(0, 0, prevZ + (sweetSpot - prevZ) * t);
-      rawLook.current.set(0, 0, swordZ);
-    } else if (localT < 0.7) {
-      // ── ORBIT ───────────────────────────────────────────────────────────────
-      const t = easeInOut((localT - 0.45) / 0.25);
-      const angle = t * (Math.PI / 2);
-      rawPos.current.set(
-        Math.sin(angle) * orbitR,
+    const sword = SWORD_POSITIONS[swordIndex];
+    const sz = sword.z; // sword world Z
+
+    // Camera Z positions:
+    const approachStartZ =
+      swordIndex === 0 ? 5 : SWORD_POSITIONS[swordIndex - 1].z - 6; // just past previous sword
+    const sweetSpotZ = sz + 5; // sweet spot: 5 units in front of sword
+    const passEndZ = sz - 6; // well past the sword
+
+    // Orbit parameters
+    const orbitRadius = 5;
+    const orbitMaxAngle = Math.PI / 2; // 90 degrees right
+
+    let targetPos = new THREE.Vector3();
+    let targetLook = new THREE.Vector3();
+
+    if (localT < 0.4) {
+      // ── APPROACH: straight in on X=0 ──────────────────────────────────────
+      const t = easeInOut(localT / 0.4);
+      targetPos.set(0, 0, approachStartZ + (sweetSpotZ - approachStartZ) * t);
+      targetLook.set(0, 0, sz);
+    } else if (localT < 0.65) {
+      // ── ORBIT: camera pivots right, X goes from 0 to +radius ──────────────
+      const t = easeInOut((localT - 0.4) / 0.25);
+      const angle = t * orbitMaxAngle;
+      const cx = Math.sin(angle) * orbitRadius;
+      const cz = sz + Math.cos(angle) * orbitRadius;
+
+      targetPos.set(cx, 0, cz);
+      targetLook.set(0, 0, sz); // always look at sword center X=0
+    } else if (localT < 0.8) {
+      // ── REALIGN: bring X back to 0 cleanly before pass ────────────────────
+      // At end of orbit: camera is at (orbitRadius, 0, sz) — full 90 degrees
+      const t = easeInOut((localT - 0.65) / 0.15);
+      const startX = Math.sin(orbitMaxAngle) * orbitRadius; // = orbitRadius
+      const startZ = sz + Math.cos(orbitMaxAngle) * orbitRadius; // = sz + 0 = sz
+
+      // Move X from orbitRadius back to 0
+      // Move Z from sz forward to sweetSpotZ (reset approach position)
+      targetPos.set(
+        startX * (1 - t), // X: orbitRadius → 0
         0,
-        swordZ + Math.cos(angle) * orbitR,
+        startZ + (sweetSpotZ - startZ) * t, // Z: sz → sweetSpotZ
       );
-      rawLook.current.set(0, 0, swordZ);
+      targetLook.set(0, 0, sz);
     } else {
-      // ── PASS ────────────────────────────────────────────────────────────────
-      // Orbit ended with camera at angle PI/2:
-      //   pos = (orbitR, 0, swordZ)  i.e. directly to the right of sword
-      // We need to go from there to straight ahead on X=0 cleanly.
-      //
-      // Split pass into two micro-phases:
-      //   0.70 → 0.78  Snap X back to 0 while holding Z near sword
-      //   0.78 → 1.00  Blast straight forward through sword on X=0
-      //
-      // By splitting we avoid the backwards jerk — X correction is fast and
-      // invisible because it happens while sword is close/large (filling screen)
-      const passT = (localT - 0.7) / 0.3; // 0→1 within pass
-
-      if (passT < 0.27) {
-        // Micro phase 1: X correction
-        const t2 = easeInOut(passT / 0.27);
-        rawPos.current.set(
-          orbitR * (1 - t2), // X: orbitR → 0
-          0,
-          swordZ, // Z holds steady at sword level
-        );
-        rawLook.current.set(0, 0, swordZ - 3);
-      } else {
-        // Micro phase 2: blast through
-        const t2 = easeInOut((passT - 0.27) / 0.73);
-        const endZ = swordZ - 8;
-        rawPos.current.set(
-          0, // X=0, dead center
-          0,
-          swordZ + (endZ - swordZ) * t2, // Z: sword level → past sword
-        );
-        rawLook.current.set(0, 0, swordZ - 20);
-      }
+      // ── PASS: straight forward on X=0, sword rushes past very close ───────
+      const t = easeInOut((localT - 0.8) / 0.2);
+      targetPos.set(
+        0, // dead center, no X offset
+        0,
+        sweetSpotZ + (passEndZ - sweetSpotZ) * t,
+      );
+      // Look straight ahead down the path
+      targetLook.set(0, 0, sz - 20);
     }
 
-    // Smooth lerp — keeps motion cinematic
-    // Use tighter lerp on pos so it feels responsive, looser on look
-    smoothPos.current.lerp(rawPos.current, 0.06);
-    smoothLook.current.lerp(rawLook.current, 0.04);
+    smoothPos.current.lerp(targetPos, 0.055);
+    smoothLook.current.lerp(targetLook, 0.055);
 
     camera.position.copy(smoothPos.current);
     camera.lookAt(smoothLook.current);
@@ -175,15 +171,21 @@ function FollowLight() {
 }
 
 export default function Scene() {
-  // React state only — which pair of swords to keep mounted
-  // We always keep current + next mounted.
-  // Fog handles visibility — swords too far away are naturally hidden.
-  // No per-frame setState. This only fires once per sword change.
-  const [mountedPair, setMountedPair] = useState([0, 1]);
+  // Only ever show current sword.
+  // Next sword only appears once current is in PASS phase (localT > 0.80)
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [showNext, setShowNext] = useState(false);
 
-  const handleIndexChange = (index) => {
-    const next = Math.min(index + 1, SWORDS.length - 1);
-    setMountedPair([index, next]);
+  const handleSwordChange = (index) => {
+    setCurrentIndex(index);
+    setShowNext(false);
+  };
+
+  const handlePhaseChange = (index, localT) => {
+    // Show next sword only once we're in PASS phase
+    // This way next sword is never visible during orbit
+    const inPass = localT >= 0.8;
+    setShowNext(inPass && index < SWORDS.length - 1);
   };
 
   useEffect(() => {
@@ -193,7 +195,7 @@ export default function Scene() {
       trigger: "body",
       start: "top top",
       end: "bottom bottom",
-      scrub: 2,
+      scrub: 1.8,
       onUpdate: (self) => {
         scrollState.scrollProgress = self.progress;
         scrollState.heroMode = self.progress < 0.02;
@@ -229,6 +231,8 @@ export default function Scene() {
     return () => ScrollTrigger.killAll();
   }, []);
 
+  const nextIndex = Math.min(currentIndex + 1, SWORDS.length - 1);
+
   return (
     <Canvas
       camera={{ position: [0, 0, 5], fov: 55 }}
@@ -249,12 +253,13 @@ export default function Scene() {
         gl.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
       }}
     >
-      {/* Fog naturally hides next sword until camera is close enough.
-          Near: 12 — fog starts. Far: 28 — fully hidden.
-          Next sword at z = swordZ - 30 is 30+ units away = invisible in fog. */}
-      <fog attach="fog" args={["#050a14", 12, 28]} />
+      {/* Fog: starts fading at 10, fully hidden at 30 */}
+      <fog attach="fog" args={["#050a14", 10, 30]} />
 
-      <CameraRig onIndexChange={handleIndexChange} />
+      <CameraRig
+        onSwordChange={handleSwordChange}
+        onPhaseChange={handlePhaseChange}
+      />
 
       <ambientLight intensity={0.18} color="#0a1020" />
       <pointLight position={[0, 10, 5]} intensity={1.5} color="#ffffff" />
@@ -268,12 +273,13 @@ export default function Scene() {
       <Smoke />
 
       <Suspense fallback={null}>
-        {/* Always mount current + next pair.
-            Fog hides next until we're close enough.
-            key ensures each sword gets fresh drag state on mount. */}
-        {mountedPair.map((i) => (
-          <SwordModel key={`s-${i}`} swordIndex={i} />
-        ))}
+        {/* Current sword — always visible */}
+        <SwordModel key={`sword-${currentIndex}`} swordIndex={currentIndex} />
+
+        {/* Next sword — only visible once current is in PASS phase */}
+        {showNext && (
+          <SwordModel key={`sword-${nextIndex}`} swordIndex={nextIndex} />
+        )}
       </Suspense>
 
       <Environment preset="night" />

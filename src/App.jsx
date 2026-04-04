@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import Scene from "./components/Scene";
 import Navbar from "./components/ui/Navbar";
 import HeroOverlay from "./components/ui/HeroOverlay";
@@ -13,12 +14,14 @@ export default function App() {
       <Navbar />
 
       <div style={{ position: "relative", zIndex: 10, pointerEvents: "none" }}>
+        {/* Hero */}
         <section id="hero" style={{ height: "100vh", position: "relative" }}>
           <HeroOverlay />
           <ScrollPrompt />
         </section>
 
-        {/* 500vh per sword — each phase gets ~150vh of comfortable scroll */}
+        {/* Each sword gets 500vh — plenty of room for approach + orbit + pass
+            without feeling rushed. Each phase gets ~150-200vh of scroll. */}
         {SWORDS.map((sword, i) => (
           <section
             key={i}
@@ -29,6 +32,7 @@ export default function App() {
           </section>
         ))}
 
+        {/* Outro */}
         <section id="outro" style={{ height: "100vh", position: "relative" }}>
           <OutroOverlay />
         </section>
