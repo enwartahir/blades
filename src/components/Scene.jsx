@@ -37,7 +37,7 @@ function CameraRig({ onSwordChange, onPhaseChange }) {
   const smoothLook = useRef(new THREE.Vector3(0, 0, -5));
   const lastIndex = useRef(-1);
   const lastPhase = useRef("approach");
-  const approachStartZ = useRef(5); // captured at moment of sword switch
+  const approachStartZ = useRef(5);
 
   useFrame(({ camera }) => {
     const raw = scrollState.scrollProgress || 0;
@@ -50,15 +50,15 @@ function CameraRig({ onSwordChange, onPhaseChange }) {
 
     if (si !== lastIndex.current) {
       lastIndex.current = si;
-      // Capture actual smoothed camera Z — never hardcoded
-      // This eliminates backward jump between pass end and next approach start
-      approachStartZ.current = smoothPos.current.z;
       scrollState.currentSwordIndex = si;
       scrollState.elementColorHex = ELEMENT_COLORS[SWORDS[si].element];
+      approachStartZ.current = camera.position.z;
+      smoothPos.current.set(0, 0, camera.position.z);
+      smoothLook.current.set(0, 0, SWORD_POSITIONS[si].z);
       onSwordChange(si);
       lastPhase.current = "approach";
       console.log(
-        `[SWORD] ${si} — ${SWORDS[si].name} | approachStart: ${approachStartZ.current.toFixed(2)}`,
+        `[SWORD] ${si} approachStart: ${camera.position.z.toFixed(2)}`,
       );
     }
 
@@ -70,27 +70,28 @@ function CameraRig({ onSwordChange, onPhaseChange }) {
 
     const swordZ = SWORD_POSITIONS[si].z;
     const sweetSpot = swordZ + 5;
-    const passEndZ = swordZ - 5; // matches next sword's approachStart
+    const passEndZ = swordZ - 10;
 
     let rawZ, lookZ;
 
     if (localT < 0.4) {
-      // APPROACH: from captured start Z → sweet spot
       const t = easeInOut(localT / 0.4);
       rawZ = approachStartZ.current + (sweetSpot - approachStartZ.current) * t;
       lookZ = swordZ;
       console.log(
-        `[APPROACH] camZ: ${rawZ.toFixed(2)} → sweetSpot: ${sweetSpot.toFixed(2)}`,
+        `[APPROACH] camZ: ${rawZ.toFixed(2)} sweetSpot: ${sweetSpot.toFixed(2)}`,
       );
     } else if (localT < 0.7) {
-      // HOLD: camera completely still
       rawZ = sweetSpot;
       lookZ = swordZ;
     } else {
-      // PASS: blast through, lookAt sword keeps it centered
       const t = easeInOut((localT - 0.7) / 0.3);
       rawZ = sweetSpot + (passEndZ - sweetSpot) * t;
-      lookZ = swordZ;
+
+      // KEY FIX: look FORWARD always — never at the sword
+      // Looking at swordZ flips camera 180° once camZ passes swordZ
+      // Looking ahead of camera means sword naturally recedes into fog behind
+      lookZ = rawZ - 8;
       console.log(
         `[PASS] t: ${t.toFixed(3)} camZ: ${rawZ.toFixed(2)} lookZ: ${lookZ.toFixed(2)}`,
       );
@@ -182,7 +183,7 @@ export default function Scene() {
       trigger: "body",
       start: "top top",
       end: "bottom bottom",
-      scrub: 1.8,
+      scrub: 0.8, // was 1.8 — lower value stops the oscillation bounce
       onUpdate: (self) => {
         scrollState.scrollProgress = self.progress;
         scrollState.heroMode = self.progress < 0.02;
