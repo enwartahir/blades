@@ -26,7 +26,7 @@ export default function App() {
           <section
             key={i}
             id={`sword-section-${i}`}
-            style={{ height: "500vh", position: "relative" }}
+            style={{ height: "350vh", position: "relative" }}
           >
             <SwordOverlay sword={sword} index={i} />
           </section>

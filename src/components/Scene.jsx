@@ -190,33 +190,51 @@ export default function Scene() {
       },
     });
 
-    SWORDS.forEach((_, i) => {
-      const isLeft = i % 2 === 0;
-      gsap
-        .timeline({
-          scrollTrigger: {
-            trigger: `#sword-section-${i}`,
-            start: "top bottom",
-            end: "bottom top",
-            scrub: 0.8,
-          },
-        })
-        .fromTo(
-          `#sword-overlay-${i}`,
-          { opacity: 0, x: isLeft ? -40 : 40 },
-          { opacity: 1, x: 0, duration: 0.3, ease: "none" },
-        )
-        .to(`#sword-overlay-${i}`, { opacity: 1, duration: 0.4 })
-        .to(`#sword-overlay-${i}`, {
-          opacity: 0,
-          x: isLeft ? 30 : -30,
-          duration: 0.3,
-          ease: "none",
-        });
-    });
+    // Sword overlay text is synced to the SAME localT the camera rig uses
+    // (see CameraRig above) — enter finishes / hold begins at localT 0.4,
+    // exactly when the camera stops, and exit begins at localT 0.7,
+    // exactly when the camera starts moving again. Runs on gsap's ticker
+    // since these DOM nodes are outside the R3F canvas and can't use
+    // useFrame.
+    const updateOverlays = () => {
+      const totalZ = (scrollState.scrollProgress || 0) * CAMERA_PATH_LENGTH;
+      SWORDS.forEach((_, i) => {
+        const isLeft = i % 2 === 0;
+        const localT = totalZ / 30 - i;
+        let opacity, x, y;
+        if (localT <= 0) {
+          opacity = 0;
+          x = isLeft ? -40 : 40;
+          y = 0;
+        } else if (localT < 0.4) {
+          const p = localT / 0.4;
+          opacity = p;
+          x = (isLeft ? -40 : 40) * (1 - p);
+          y = 0;
+        } else if (localT < 0.7) {
+          opacity = 1;
+          x = 0;
+          y = 0;
+        } else if (localT < 1) {
+          const p = (localT - 0.7) / 0.3;
+          opacity = 1 - p;
+          x = (isLeft ? 30 : -30) * p;
+          y = -24 * p;
+        } else {
+          opacity = 0;
+          x = isLeft ? 30 : -30;
+          y = -24;
+        }
+        gsap.set(`#sword-overlay-${i}`, { opacity, x, y });
+      });
+    };
 
+    gsap.ticker.add(updateOverlays);
     ScrollTrigger.refresh();
-    return () => ScrollTrigger.killAll();
+    return () => {
+      gsap.ticker.remove(updateOverlays);
+      ScrollTrigger.killAll();
+    };
   }, []);
 
   const nextIndex = Math.min(currentIndex + 1, SWORDS.length - 1);
